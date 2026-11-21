@@ -39,6 +39,22 @@ Upstream's README, `CONTRIBUTING.md` and `docs/` still apply.
 
 Newest first.
 
+### Clip archive backfill from a HomeBase 3's past days (2026-11-21)
+
+- **What it adds:** `CLIP_ARCHIVE_BACKFILL_DAYS` (default 0, off): each archive sweep also saves every recording the
+  stations still hold for that many past days, newest first, `CLIP_ARCHIVE_PAUSE_MS` (default 1 s) apart. A past day
+  whose recordings are all saved is marked done in `.index.json` and not read again.
+- **Cause:** the archive read the station's history with the direct read (10000), which a HomeBase 3 answers with
+  today's rows whatever the dates, so nothing older than today reached the archive.
+- **Change:** `warmup.mjs` gains `recordingRowsForDay(day)`: the event-history read (inner cmd 10011), which a
+  HomeBase 3 answers for the day `start_date` names, newest first, 50 rows a page, paged back by `start_id` (rows with
+  a record id at most it). `clip-archive.mjs` walks the days; downloads run beside the after-detection passes (the SDK
+  queues them per station) and a recording being saved is never fetched twice. Docs: `docs/docker-compose.md`. Tests:
+  `test/clip-archive.test.mjs`, `test/clip-hb3.test.mjs`.
+- **Live (T8030 firmware 1.2.0.1, 2026-11-21):** 10011 answered every day back to the drive's first recordings
+  (2026-10-24), e.g. Nov 16 in three pages (126 recordings) and Nov 10 in more than ten (over 500). It ignores a time
+  of day in the dates, answers only the first day of a range, and refuses the paged local query (10017) with -6006.
+
 ### Low-delay live input for the Indoor Cam S350 (2026-11-21)
 
 - **What it changes:** go2rtc reads a T8416's live feed through a named `eufy_low_delay` input template: a short probe

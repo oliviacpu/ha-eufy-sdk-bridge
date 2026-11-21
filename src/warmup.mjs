@@ -783,6 +783,82 @@ export function createWarmup(ctx) {
     });
   }
 
+  // The event-history read (inner cmd 10011) a HomeBase 3 answers for the day `start_date` names, unlike the
+  // direct read above, which answers today's rows whatever the dates. Rows come newest first, 50 a page, and
+  // `start_id` pages back: rows whose record id is at most it (0 = from the newest). The reply bundles other
+  // tables (crop pictures, heat maps, faces) beside `history_record_info`, and states `data` as a JSON string
+  // when empty. Verified on a T8030 (firmware 1.2.0.1); it refuses the paged local query (10017) with -6006.
+  const DAY_PAGE_ROWS = 50;
+  const DAY_PAGES_MAX = 100;
+
+  /** One page of `day`'s rows from `session`, or undefined when the station did not answer. Caller holds the lock. */
+  async function readDayPage(session, accountId, day, startId) {
+    let chunk = "";
+    const onChunk = ({ text }) => (chunk += text);
+    session.on("dbChunk", onChunk);
+    session.queryDatabase("history_record_info", {
+      accountId,
+      innerCmd: 10011,
+      query: {
+        ...HISTORY_TABLE_QUERY,
+        count: DAY_PAGE_ROWS,
+        start_date: day,
+        end_date: day,
+        start_id: startId,
+        end_id: 1,
+      },
+    });
+    let obj;
+    for (let i = 0; i < 70; i++) {
+      await sleep(200);
+      obj = firstJsonObject(chunk);
+      if (obj && obj.data !== undefined) break;
+    }
+    session.off?.("dbChunk", onChunk);
+    if (obj?.data === undefined) return undefined;
+    let groups = obj.data;
+    if (typeof groups === "string") {
+      try {
+        groups = JSON.parse(groups);
+      } catch {
+        groups = [];
+      }
+    }
+    const table = Array.isArray(groups) ? groups.find((g) => g?.table_name === "history_record_info") : undefined;
+    return Array.isArray(table?.payload) ? table.payload : [];
+  }
+
+  /**
+   * Every recording the connected stations hold for `day` (`yyyyMMdd`, the station's date), newest first, paged
+   * through 10011. Answers null when no station answered at all, so a caller can tell an empty day from a
+   * silent station. Each page is its own DB-lock turn, so other reads go in between.
+   */
+  async function recordingRowsForDay(day) {
+    const sessions = stationSessions();
+    if (!sessions.size) return null;
+    const devs = await eufy.getDevices();
+    const accountId = await accountIdOf(devs);
+    const rows = [];
+    let answered = false;
+    for (const [stationSn, session] of sessions) {
+      let cursor = 0;
+      for (let page = 0; page < DAY_PAGES_MAX; page++) {
+        if (!session.isConnected) break;
+        const recs = await withDbLock(() => readDayPage(session, accountId, day, cursor));
+        if (recs === undefined) break;
+        answered = true;
+        for (const rec of recs) {
+          const row = recordingOf(rec, stationSn);
+          if (row) rows.push(row);
+        }
+        const ids = recs.map(recordTime).filter((id) => id > 0);
+        if (recs.length < DAY_PAGE_ROWS || !ids.length) break;
+        cursor = Math.min(...ids) - 1;
+      }
+    }
+    return answered ? rows.sort((a, b) => b.recordId - a.recordId) : null;
+  }
+
   /** A recording row's cover image as JPEG bytes, or undefined. Serialised with every other DB read. */
   function recordingCover(row) {
     return withDbLock(async () => {
@@ -812,6 +888,7 @@ export function createWarmup(ctx) {
     autoHealEventImage: localEventRefresh ? autoHealEventImage : noop,
     latestTriggerType,
     recordingRows: localEventRefresh ? recordingRows : async () => [],
+    recordingRowsForDay: localEventRefresh ? recordingRowsForDay : async () => null,
     recordingCover,
   };
 }

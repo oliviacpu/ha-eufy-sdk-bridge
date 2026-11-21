@@ -165,3 +165,83 @@ test("recordingCover: fetches the row's own cover from its station", async () =>
   assert.equal(cover[0], 0xff);
   assert.equal(cover.subarray(2).toString(), newest.coverPath);
 });
+
+/**
+ * A HomeBase 3 answering the event-history read (10011) the way a T8030 does: only the day `start_date`
+ * names, newest first, 50 rows a page, rows with a record id at most `start_id` (0 = newest), bundled with
+ * other tables, and `data` as the string "[]" when nothing is left.
+ */
+function dayStation(rowsByDay) {
+  const s = new EventEmitter();
+  s.isConnected = true;
+  s.queries = [];
+  s.queryDatabase = (_table, opts) => {
+    if (opts.innerCmd !== 10011) return;
+    const { start_date: day, start_id: startId } = opts.query;
+    s.queries.push([day, startId]);
+    const page = (rowsByDay[day] ?? [])
+      .filter((r) => !startId || r.record_id <= startId)
+      .sort((a, b) => b.record_id - a.record_id)
+      .slice(0, 50);
+    const data = page.length
+      ? [
+          { table_name: "history_record_info", payload: page },
+          { table_name: "face_feature_info", payload: [{ id: 1 }] },
+        ]
+      : "[]";
+    setTimeout(() => s.emit("dbChunk", { text: JSON.stringify({ cmd: 10011, data, mIntRet: 0 }) }), 0);
+  };
+  return s;
+}
+
+test("recordingRowsForDay: pages a busy day back by record id and keeps only rows naming a recording", async () => {
+  const busy = Array.from({ length: 120 }, (_, i) => {
+    const stamp = `20261110${String(Math.floor(i / 60)).padStart(2, "0")}${String(i % 60).padStart(2, "0")}00`;
+    return { ...row("CAM1", stamp), record_id: 2026111000100 + i * 3 };
+  });
+  const station = dayStation({
+    20261110: [...busy, { device_sn: "HB3", record_id: 2026111000001, start_time: "2026-11-10 00:00:01" }],
+  });
+  const warm = createWarmup({
+    eventImageDir: fs.mkdtempSync(path.join(os.tmpdir(), "days-")),
+    eventLog: () => {},
+    broadcast: () => {},
+    state: { faceNames: new Map(), streaming: new Set() },
+    eufy: {
+      getP2pSessions: () => new Map([["HB3", station]]),
+      getDevices: async () => [{ sn: "CAM1", stationSn: "HB3" }],
+      connectStation: async () => {},
+    },
+  });
+  const rows = await run(() => warm.recordingRowsForDay("20261110"));
+  assert.equal(rows.length, 120);
+  assert.equal(new Set(rows.map((r) => r.recordId)).size, 120);
+  assert.ok(rows.every((r, i) => i === 0 || rows[i - 1].recordId > r.recordId)); // newest first
+  assert.deepEqual(
+    station.queries.map(([day, startId]) => [day, startId]),
+    [
+      ["20261110", 0],
+      ["20261110", 2026111000100 + 70 * 3 - 1],
+      ["20261110", 2026111000100 + 20 * 3 - 1],
+    ],
+  );
+  assert.deepEqual(await run(() => warm.recordingRowsForDay("20261103")), []);
+});
+
+test("recordingRowsForDay: null when no station answers", async () => {
+  const silent = new EventEmitter();
+  silent.isConnected = true;
+  silent.queryDatabase = () => {};
+  const warm = createWarmup({
+    eventImageDir: fs.mkdtempSync(path.join(os.tmpdir(), "days-")),
+    eventLog: () => {},
+    broadcast: () => {},
+    state: { faceNames: new Map(), streaming: new Set() },
+    eufy: {
+      getP2pSessions: () => new Map([["HB2", silent]]),
+      getDevices: async () => [],
+      connectStation: async () => {},
+    },
+  });
+  assert.equal(await run(() => warm.recordingRowsForDay("20261110")), null);
+});
