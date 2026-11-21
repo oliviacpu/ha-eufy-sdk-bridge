@@ -38,3 +38,22 @@ Upstream's README, `CONTRIBUTING.md` and `docs/` still apply.
 ## Changes in this fork
 
 Newest first.
+
+### HomeBase 3 recordings for `/clip`, and a clip archive (2026-11-21)
+
+- **What it adds:** `/clip/<sn>` works for a camera behind a HomeBase 3. `CLIP_ARCHIVE_DIR` (off unless set) keeps
+  every recording the cameras' HomeBases hold as `<camera name>/<yyyy>/<MM>/<dd>/<HH-mm-ss>.mp4` with the event's
+  cover beside it as `.jpg`, once each; `CLIP_ARCHIVE_SWEEP_MS` (default 30 min) sets how often it catches up.
+- **Cause:** `/clip` learns the recording from the push (`payload.p`), and a HomeBase 3's push names none, so it
+  always answered 409. The H.265 such a station records was muxed as H.264.
+- **Change:** without a push, `/clip` takes the newest recording the station's `history_record_info` table names and
+  downloads it at the row's `storage_path` (the library fork's `storagePath`), which reaches a drive fitted to the
+  station. `muxMp4` reads H.265 as `hevc`, tags it `hvc1` (what Safari and Apple's players need) and puts the frame
+  rate in `-r`. The archive (`src/clip-archive.mjs`) runs after each detection (45 s, 2 min, 5 min), at startup and on
+  the sweep; `.index.json` keys saved files by station and record id, and a download that fails or comes back short of
+  the row's frame count is left for the next pass. `warmup.mjs` exposes `recordingRows` and `recordingCover` on the
+  locked history read the cover refresh already uses. Docs: `README.md`, `docs/ws-protocol.md`,
+  `docs/docker-compose.md`. Tests: `test/clip-hb3.test.mjs`, `test/clip-archive.test.mjs`.
+- **Live (T8030 with a 500 GB SSD, 2026-11-21):** the station streamed a T8170's and a T8213's recordings in full
+  from `/zx/hdd_data1/…` in about 3 s each. Muxed as `hvc1` and as `hev1`, both played in Chrome with no dropped or
+  corrupted frames.

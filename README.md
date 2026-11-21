@@ -15,7 +15,7 @@ WS    :3000/ws             control, state, events     ← the frontend talks to 
 HTTP  :3000/stream/<sn>    live video (Annex-B)       ← go2rtc pulls this
 HTTP  :3000/audio/<sn>     live audio (ADTS AAC)      ← and this, next to the video
 HTTP  :3000/snapshot/<sn>  a JPEG still
-HTTP  :3000/clip/<sn>      the latest detection's recording, as an mp4 (HomeBase 2)
+HTTP  :3000/clip/<sn>      the latest detection's recording, as an mp4 (HomeBase 2 and 3)
 HTTP  :3000/healthz        which cameras are streaming
 ```
 

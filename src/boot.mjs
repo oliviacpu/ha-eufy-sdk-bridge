@@ -130,6 +130,7 @@ export function createBoot(ctx) {
             // Local-storage accounts get no push thumbnail, so pull the fresh event cover from HomeBase
             // storage and (if it changed) nudge HA to re-fetch — otherwise "Last event" stays frozen.
             ctx.onDetectionRefresh?.(payload?.deviceSn);
+            ctx.archiveAfterDetection?.(payload?.deviceSn); // CLIP_ARCHIVE_DIR: save its recording once written
           }
           if (e === "motion" && cfg.personFromRecord && payload?.deviceSn)
             setTimeout(() => void upgradeMotionToPerson(payload.deviceSn), PERSON_UPGRADE_DELAY_MS);
@@ -167,6 +168,10 @@ export function createBoot(ctx) {
       void (async () => {
         await ctx.warmFaceRoster(); // resolve person_id -> name for face-recognition events
         await ctx.warmLastEventImages(); // populate "Last event" from local HomeBase storage on first load
+        if (cfg.clipArchiveDir) {
+          await ctx.archiveSweep?.(); // catch up on recordings made while the bridge was down
+          timers.clipArchive ??= setInterval(() => void ctx.archiveSweep?.(), cfg.clipArchiveSweepMs);
+        }
       })();
     } finally {
       flags.booting = false;

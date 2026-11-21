@@ -528,7 +528,7 @@ and implements them; registration alone does not establish hardware support for 
 | `GET /snapshot/<sn>`    | a JPEG still (`image/jpeg`). _Requires auth._                                                                        |
 | `GET /stream/<sn>`      | live Annex-B H.264/H.265 (`application/octet-stream`) — what go2rtc pulls. _Requires auth._                          |
 | `GET /audio/<sn>`       | live ADTS AAC-LC (`audio/aac`); `?view=` selects the same advertised optic as video. No supported audio returns 404. |
-| `GET /clip/<sn>`        | the latest detection's HomeBase 2 recording (`video/mp4`). _Requires auth._                                          |
+| `GET /clip/<sn>`        | the latest detection's HomeBase 2 or 3 recording (`video/mp4`). _Requires auth._                                     |
 | `GET /last-screen/<sn>` | the last picture someone watched live (`image/jpeg`, header `x-saved-at`); 404 until watched once. _Requires auth._  |
 
 **A primed `/stream` has no error status.** With `STREAM_INSTANT_START` on (the default) the bridge answers
@@ -558,10 +558,12 @@ Invalid, empty, or duplicate `mode` parameters return HTTP 400.
 whichever of the two is newer.
 
 `GET /clip/<sn>` downloads the recording the camera's latest push named, over the station's P2P session
-(the camera is not woken), and muxes it with ffmpeg. It waits until `CLIP_SETTLE_MS` has passed since
-that push, then keeps the clip until the next one. It answers 404 on a camera without stored recordings
-(anything but a HomeBase 2 camera), 409 when no push has named a recording since the bridge started, and
-502 with the SDK's `reason` when the download fails.
+(the camera is not woken), and muxes it with ffmpeg (H.265 tagged `hvc1`, so Safari plays it). It waits until
+`CLIP_SETTLE_MS` has passed since that push, then keeps the clip until the next one. A HomeBase 3's push
+names no recording, so without one the newest recording the station's history table names is used, at the
+path the table gives (a drive fitted to the station included). It answers 404 on a camera without stored
+recordings (anything but a HomeBase 2 or 3 camera), 409 when neither a push nor the station names a
+recording, and 502 with the SDK's `reason` when the download fails.
 
 go2rtc (bundled) turns `/stream/<sn>` into RTSP / WebRTC / MSE / HLS, so the frontend never speaks the
 raw video protocol.
