@@ -1,0 +1,43 @@
+# Fork-only: daily, merge upstream's dev into main and move the library to oliviacpu/eufy-sdk's newest release,
+# check, push and build an image. Anything that needs a person opens the upstream-sync issue instead. See FORK.md.
+name: Fork sync
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  packages: write
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+jobs:
+  merge:
+    if: github.repository != 'mega-yfue/ha-eufy-sdk-bridge'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - id: merge
+        run: bash .github/fork/sync.sh
+
+  image:
+    needs: merge
+    if: needs.merge.outputs.changed == 'true'
+    uses: ./.github/workflows/fork-image.yml
