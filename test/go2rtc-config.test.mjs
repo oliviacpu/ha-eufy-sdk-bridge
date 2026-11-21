@@ -99,7 +99,7 @@ test("known indoor H.264 feeds bypass format probing without transcoding or losi
   const { yaml, sns } = await generate({}, [
     { sn: "INDOOR1", model: "T8400", stream: "/stream/INDOOR1" },
     { sn: "INDOOR2", model: "T8410", stream: "/stream/INDOOR2" },
-    { sn: "OTHER", model: "T8416", stream: "/stream/OTHER" },
+    { sn: "OTHER", model: "T8424", stream: "/stream/OTHER" },
     { sn: "UNKNOWN", stream: "/stream/UNKNOWN" },
   ]);
   assert.deepEqual(sns, ["INDOOR1", "INDOOR2", "OTHER", "UNKNOWN"]);
@@ -112,6 +112,18 @@ test("known indoor H.264 feeds bypass format probing without transcoding or losi
   for (const sn of ["OTHER", "UNKNOWN"]) {
     assert.ok(yaml.includes(`${sn}:\n    - ffmpeg:http://127.0.0.1:3000/stream/${sn}#video=copy#async\n`));
   }
+});
+
+test("the Indoor Cam S350 is read with low-delay input, its codec left to a short probe", async () => {
+  const { yaml } = await generate({}, [{ sn: "S350", model: "T8416", stream: "/stream/S350" }]);
+  assert.ok(
+    yaml.includes(
+      '  eufy_low_delay: "-fflags nobuffer -flags low_delay -probesize 32768 -analyzeduration 1000000 -i {input}"\n',
+    ),
+  );
+  assert.ok(
+    yaml.includes("S350:\n    - ffmpeg:http://127.0.0.1:3000/stream/S350#video=copy#async#input=eufy_low_delay\n"),
+  );
 });
 
 test("the input selection also preserves advertised optical-view paths", async () => {

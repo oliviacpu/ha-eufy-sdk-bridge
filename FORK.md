@@ -39,6 +39,15 @@ Upstream's README, `CONTRIBUTING.md` and `docs/` still apply.
 
 Newest first.
 
+### Low-delay live input for the Indoor Cam S350 (2026-11-21)
+
+- **What it changes:** go2rtc reads a T8416's live feed through a named `eufy_low_delay` input template: a short probe
+  (32 KB, 1 s) and no input buffering. Its codec is left to the probe, unlike the T8400/T8410's forced H.264.
+- **Cause:** the install had mounted a hand-patched `go2rtc-config.mjs` since 2026-10-22 that matched the camera by
+  serial; upstream since restructured the file, so the patch no longer applies.
+- **Change:** `go2rtc-config.mjs`. Test: `test/go2rtc-config.test.mjs` (upstream's "other model" case now uses a
+  T8424, since the T8416 is no longer plain).
+
 ### The library from oliviacpu/eufy-sdk (2026-11-21)
 
 - **What it changes:** `@mega-yfue/eufy-sdk` comes from a [library fork](https://github.com/oliviacpu/eufy-sdk) release
