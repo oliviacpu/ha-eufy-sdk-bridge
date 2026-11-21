@@ -156,6 +156,12 @@ export function loadConfig(env = process.env) {
     // recordings not yet saved, besides the check after each detection. Default 30 min.
     clipArchiveDir: env.CLIP_ARCHIVE_DIR?.trim() || undefined,
     clipArchiveSweepMs: positiveInt(env.CLIP_ARCHIVE_SWEEP_MS) ?? 30 * 60_000,
+    // CLIP_ARCHIVE_BACKFILL_DAYS: on each sweep, also save every recording the stations still hold for that many
+    // past days (a HomeBase 3 day read). Default 0 = only the newest rows. CLIP_ARCHIVE_PAUSE_MS: the pause
+    // between two backfill downloads, so a long backfill leaves the station room. Default 1 s.
+    clipArchiveBackfillDays: positiveInt(env.CLIP_ARCHIVE_BACKFILL_DAYS) ?? 0,
+    clipArchivePauseMs:
+      env.CLIP_ARCHIVE_PAUSE_MS?.trim() === "0" ? 0 : (positiveInt(env.CLIP_ARCHIVE_PAUSE_MS) ?? 1000),
     // Event pre-warm: the SDK can speculatively open a camera's P2P session on a high-intent event
     // (doorbell/person/pet/package) so a following live view starts instantly. OFF by default here — it
     // holds a battery camera's radio open for ~28s per event. Set BRIDGE_PREWARM=1 to pre-warm on the four
