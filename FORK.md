@@ -39,6 +39,14 @@ Upstream's README, `CONTRIBUTING.md` and `docs/` still apply.
 
 Newest first.
 
+### The library from oliviacpu/eufy-sdk (2026-11-21)
+
+- **What it changes:** `@mega-yfue/eufy-sdk` comes from a [library fork](https://github.com/oliviacpu/eufy-sdk) release
+  asset by URL instead of npm's stable release. The fork is upstream's newest beta, which has HomeBase 3 recording
+  download, plus `downloadRecording`'s `storagePath` (a HomeBase 3 with a drive fitted) and the Indoor Cam S350 on the
+  wired power tier. `fork-sync.yml` moves the URL to the library fork's newest release.
+- **Change:** `package.json`, `package-lock.json`. The Dockerfile's `npm ci` installs it as before.
+
 ### HomeBase 3 recordings for `/clip`, and a clip archive (2026-11-21)
 
 - **What it adds:** `/clip/<sn>` works for a camera behind a HomeBase 3. `CLIP_ARCHIVE_DIR` (off unless set) keeps
