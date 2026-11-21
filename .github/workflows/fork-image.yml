@@ -1,0 +1,107 @@
+# Fork-only (oliviacpu/ha-eufy-sdk-bridge): check main, build its image for linux/amd64, push
+# ghcr.io/<owner>/ha-eufy-sdk-bridge:oliviacpu-YYYY.MM.DD[.N] (.2 for a second one the same day) and move :latest
+# to it, tag main with the same name, and create the GitHub Release listing the fork changes. Run by fork-sync.yml
+# after it takes upstream or a library release, or by hand after merging a fork change. Nothing deploys the
+# image; see FORK.md.
+name: Fork image
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: write # the tag and release
+  packages: write # the image
+
+concurrency:
+  group: fork-image
+  cancel-in-progress: false
+
+jobs:
+  image:
+    if: github.repository != 'mega-yfue/ha-eufy-sdk-bridge'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check
+        run: |
+          npm ci
+          npm run lint
+          git ls-files '*.mjs' | xargs -n1 node --check
+          npm test
+
+      - name: Name
+        run: |
+          git fetch --quiet --force --tags origin
+          day=$(date -u +%Y.%m.%d)
+          count=$(git tag -l "oliviacpu-$day" "oliviacpu-$day.*" | wc -l | tr -d ' ')
+          tag="oliviacpu-$day"
+          [ "$count" -gt 0 ] && tag="$tag.$((count + 1))"
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ha-eufy-sdk-bridge" >> "$GITHUB_ENV"
+          echo "SDK=$(node -p 'require("./node_modules/@mega-yfue/eufy-sdk/package.json").version')" >> "$GITHUB_ENV"
+          echo "BRIDGE=$(node -p 'require("./package.json").version')" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.IMAGE }}:${{ env.TAG }}
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.BRIDGE }}-${{ env.TAG }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          git fetch --quiet https://github.com/mega-yfue/ha-eufy-sdk-bridge.git dev:refs/remotes/upstream/dev
+          prev=$(git tag -l 'oliviacpu-*' --sort=-v:refname | head -n 1)
+          git tag "$TAG" HEAD
+          git push origin "$TAG"
+          repo="https://github.com/${GITHUB_REPOSITORY}"
+          fmt="- %s ([%h](${repo}/commit/%H))"
+          {
+            echo "Bridge ${BRIDGE} (upstream \`dev\` at $(git rev-parse --short refs/remotes/upstream/dev)) on @mega-yfue/eufy-sdk ${SDK}."
+            echo
+            echo "Image: \`${IMAGE}:${TAG}\` and \`:latest\`, digest \`${DIGEST}\`."
+            echo
+            if [ -n "$prev" ]; then
+              echo "## New since ${prev}"
+              echo
+              git log --no-merges --reverse --format="$fmt" "${prev}..HEAD" --not refs/remotes/upstream/dev
+              echo
+            fi
+            echo "## All fork changes not in upstream"
+            echo
+            echo "What each one fixes, why, and how: [FORK.md](${repo}/blob/$(git rev-parse HEAD)/FORK.md)."
+            echo
+            git log --no-merges --reverse --format="$fmt" refs/remotes/upstream/dev..HEAD
+          } > "$RUNNER_TEMP/release-notes.md"
+          gh release create "$TAG" --verify-tag --title "$TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
