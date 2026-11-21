@@ -26,6 +26,7 @@ export async function writeGo2rtcConfig(cfg, devices) {
     `  listen: ":${cfg.go2rtcWebrtcPort ?? 8555}"`,
     "ffmpeg:",
     '  eufy_h264: "-analyzeduration 0 -probesize 32768 -f h264 -i {input}"',
+    '  eufy_low_delay: "-fflags nobuffer -flags low_delay -probesize 32768 -analyzeduration 1000000 -i {input}"',
     "streams:",
   ];
   for (const d of cams) {
@@ -37,7 +38,13 @@ export async function writeGo2rtcConfig(cfg, devices) {
     // the feed is remuxed, not transcoded, and a live view has no timeline to preserve.
     // These indoor models supply raw H.264; probing can mistake it for MPEG audio/TS.
     // Use a named template: inline {input} is interpreted as a go2rtc source replacement.
-    const input = ["T8400", "T8410"].includes(d.model) ? "#input=eufy_h264" : "";
+    // The Indoor Cam S350 (T8416) is probed briefly and read without input buffering, so its live view
+    // starts promptly; its codec is left to the probe.
+    const input = ["T8400", "T8410"].includes(d.model)
+      ? "#input=eufy_h264"
+      : d.model === "T8416"
+        ? "#input=eufy_low_delay"
+        : "";
     for (const view of d.views ?? [{ id: d.sn, stream: d.stream }]) {
       const base = `http://${cfg.selfHost}:${cfg.port}`;
       const audioPath = view.stream.replace(/^\/stream\//, "/audio/");

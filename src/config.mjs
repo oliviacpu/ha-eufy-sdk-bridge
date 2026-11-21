@@ -151,6 +151,11 @@ export function loadConfig(env = process.env) {
     // How long after the push /clip waits before downloading a HomeBase 2 recording, so the station has
     // finished writing it. Set it at least to the camera's clip length. Default 30s.
     clipSettleMs: env.CLIP_SETTLE_MS != null ? Number(env.CLIP_SETTLE_MS) : 30_000,
+    // Keep every recording the cameras' HomeBases hold in this folder, with each event's cover (see
+    // clip-archive.mjs). Unset = no archive. CLIP_ARCHIVE_SWEEP_MS: how often every camera is checked for
+    // recordings not yet saved, besides the check after each detection. Default 30 min.
+    clipArchiveDir: env.CLIP_ARCHIVE_DIR?.trim() || undefined,
+    clipArchiveSweepMs: positiveInt(env.CLIP_ARCHIVE_SWEEP_MS) ?? 30 * 60_000,
     // Event pre-warm: the SDK can speculatively open a camera's P2P session on a high-intent event
     // (doorbell/person/pet/package) so a following live view starts instantly. OFF by default here — it
     // holds a battery camera's radio open for ~28s per event. Set BRIDGE_PREWARM=1 to pre-warm on the four

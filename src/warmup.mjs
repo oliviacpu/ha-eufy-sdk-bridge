@@ -338,7 +338,7 @@ export function createWarmup(ctx) {
       const cur = newest.get(dsn);
       if (!cur || ts >= cur.ts) newest.set(dsn, { ts, path: p, rec });
     }
-    return { covers: newest, recordCount: records.length, seen, answered };
+    return { covers: newest, recordCount: records.length, seen, answered, records };
   }
 
   /** A station's `p2p_did`, the key a stored image's `eufysecurity:` wrapper is decoded with. */
@@ -726,6 +726,74 @@ export function createWarmup(ctx) {
       .finally(() => pendingRefresh.delete(sn));
   }
 
+  /**
+   * A `history_record_info` row as a recording the SDK can download, or undefined when it names none. The
+   * recording is the file name of `storage_path` without its extension; the path itself goes along, since a
+   * HomeBase 3 with a drive fitted stores recordings off its built-in storage. A cipher id above 24 bits
+   * resolves through its low byte (SDK docs/live-media.md). `coverPath` is the event's own cover image.
+   */
+  function recordingOf(rec, stationSn) {
+    const pl = rec?.payload ?? rec;
+    const storagePath = pl?.storage_path;
+    if (typeof storagePath !== "string" || !storagePath.includes("/") || !rec?.device_sn) return undefined;
+    const cipher = Number(pl?.cipher_id ?? 0) || 0;
+    return {
+      sn: rec.device_sn,
+      stationSn,
+      recordId: recordTime(rec),
+      recording: path.posix.parse(storagePath).name,
+      storagePath,
+      cipherId: cipher > 0xffffff ? cipher & 0xff : cipher,
+      start: pl?.start_time,
+      end: pl?.end_time,
+      frameNum: Number(pl?.frame_num) || undefined,
+      coverPath: cropPathOf(rec),
+    };
+  }
+
+  /**
+   * The recordings the stations' history tables name, newest first: `sn`'s alone (read from its own station
+   * first, stopping at the first station that names any), or every device's on every connected station when
+   * `sn` is absent. Uses the same direct read as the cover refresh, so the table's newest rows only (50).
+   * Serialised with every other DB read; answers [] when nothing is readable.
+   */
+  function recordingRows(sn) {
+    return withDbLock(async () => {
+      try {
+        const sessions = stationSessions();
+        if (!sessions.size) return [];
+        const devs = await eufy.getDevices();
+        const accountId = await accountIdOf(devs);
+        const ownStation = sn ? devs.find((d) => d.sn === sn)?.stationSn : undefined;
+        const rows = [];
+        for (const [stationSn, session] of ownStationFirst(sessions, ownStation)) {
+          if (!session.isConnected) continue;
+          const { records } = await queryStationCovers(session, accountId, stationSn);
+          for (const rec of records) {
+            const row = recordingOf(rec, stationSn);
+            if (row && (!sn || row.sn === sn)) rows.push(row);
+          }
+          if (sn && rows.length) break;
+        }
+        return rows.sort((a, b) => b.recordId - a.recordId);
+      } catch (e) {
+        console.error(`[bridge] recording rows${sn ? ` for ${sn}` : ""} failed: ${e?.message ?? e}`);
+        return [];
+      }
+    });
+  }
+
+  /** A recording row's cover image as JPEG bytes, or undefined. Serialised with every other DB read. */
+  function recordingCover(row) {
+    return withDbLock(async () => {
+      if (!row?.coverPath) return undefined;
+      const session = stationSessions().get(row.stationSn);
+      if (!session?.isConnected) return undefined;
+      const devs = await eufy.getDevices();
+      return fetchImage(session, row.coverPath, await accountIdOf(devs), p2pDidOf(devs, row.stationSn));
+    });
+  }
+
   // EUFY_LOCAL_EVENT_REFRESH=0 (bridge #139): skip the HomeBase/local-storage P2P reads for an account
   // where they return nothing but still hammer the camera — the on-detection cover refresh, the startup
   // face-roster + last-event warm-ups, and the /event-image auto-heal. The push-thumbnail path
@@ -743,5 +811,7 @@ export function createWarmup(ctx) {
     forceRefreshEventImage,
     autoHealEventImage: localEventRefresh ? autoHealEventImage : noop,
     latestTriggerType,
+    recordingRows: localEventRefresh ? recordingRows : async () => [],
+    recordingCover,
   };
 }

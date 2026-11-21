@@ -38,3 +38,39 @@ Upstream's README, `CONTRIBUTING.md` and `docs/` still apply.
 ## Changes in this fork
 
 Newest first.
+
+### Low-delay live input for the Indoor Cam S350 (2026-11-21)
+
+- **What it changes:** go2rtc reads a T8416's live feed through a named `eufy_low_delay` input template: a short probe
+  (32 KB, 1 s) and no input buffering. Its codec is left to the probe, unlike the T8400/T8410's forced H.264.
+- **Cause:** the install had mounted a hand-patched `go2rtc-config.mjs` since 2026-10-22 that matched the camera by
+  serial; upstream since restructured the file, so the patch no longer applies.
+- **Change:** `go2rtc-config.mjs`. Test: `test/go2rtc-config.test.mjs` (upstream's "other model" case now uses a
+  T8424, since the T8416 is no longer plain).
+
+### The library from oliviacpu/eufy-sdk (2026-11-21)
+
+- **What it changes:** `@mega-yfue/eufy-sdk` comes from a [library fork](https://github.com/oliviacpu/eufy-sdk) release
+  asset by URL instead of npm's stable release. The fork is upstream's newest beta, which has HomeBase 3 recording
+  download, plus `downloadRecording`'s `storagePath` (a HomeBase 3 with a drive fitted) and the Indoor Cam S350 on the
+  wired power tier. `fork-sync.yml` moves the URL to the library fork's newest release.
+- **Change:** `package.json`, `package-lock.json`. The Dockerfile's `npm ci` installs it as before.
+
+### HomeBase 3 recordings for `/clip`, and a clip archive (2026-11-21)
+
+- **What it adds:** `/clip/<sn>` works for a camera behind a HomeBase 3. `CLIP_ARCHIVE_DIR` (off unless set) keeps
+  every recording the cameras' HomeBases hold as `<camera name>/<yyyy>/<MM>/<dd>/<HH-mm-ss>.mp4` with the event's
+  cover beside it as `.jpg`, once each; `CLIP_ARCHIVE_SWEEP_MS` (default 30 min) sets how often it catches up.
+- **Cause:** `/clip` learns the recording from the push (`payload.p`), and a HomeBase 3's push names none, so it
+  always answered 409. The H.265 such a station records was muxed as H.264.
+- **Change:** without a push, `/clip` takes the newest recording the station's `history_record_info` table names and
+  downloads it at the row's `storage_path` (the library fork's `storagePath`), which reaches a drive fitted to the
+  station. `muxMp4` reads H.265 as `hevc`, tags it `hvc1` (what Safari and Apple's players need) and puts the frame
+  rate in `-r`. The archive (`src/clip-archive.mjs`) runs after each detection (45 s, 2 min, 5 min), at startup and on
+  the sweep; `.index.json` keys saved files by station and record id, and a download that fails or comes back short of
+  the row's frame count is left for the next pass. `warmup.mjs` exposes `recordingRows` and `recordingCover` on the
+  locked history read the cover refresh already uses. Docs: `README.md`, `docs/ws-protocol.md`,
+  `docs/docker-compose.md`. Tests: `test/clip-hb3.test.mjs`, `test/clip-archive.test.mjs`.
+- **Live (T8030 with a 500 GB SSD, 2026-11-21):** the station streamed a T8170's and a T8213's recordings in full
+  from `/zx/hdd_data1/…` in about 3 s each. Muxed as `hvc1` and as `hev1`, both played in Chrome with no dropped or
+  corrupted frames.

@@ -31,6 +31,7 @@ import { createAuth } from "./src/auth.mjs";
 import { createBoot } from "./src/boot.mjs";
 import { createSolix } from "./src/solix.mjs";
 import { createClips } from "./src/clip.mjs";
+import { createClipArchive } from "./src/clip-archive.mjs";
 import { createHttpHandler } from "./src/http-routes.mjs";
 import { createWsServer } from "./src/ws-server.mjs";
 import { closeStreamClients } from "./streams.mjs";
@@ -79,6 +80,7 @@ Object.assign(
   createBoot(ctx),
   createSolix(ctx),
   createClips(ctx),
+  createClipArchive(ctx),
 );
 
 const httpServer = http.createServer(createHttpHandler(ctx));
