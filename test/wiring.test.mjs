@@ -334,3 +334,23 @@ test("ws: device.set holds a mode write for confirmation before sending it, and 
 
   httpServer.close();
 });
+
+test("ws: auth.retrigger drops a pending automatic login retry, even when it fails", async (t) => {
+  t.mock.method(console, "error", () => {});
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { ctx, state, httpServer } = buildCtx();
+  ctx.cfg.loginRetry = true;
+  let logins = 0;
+  ctx.eufy.login = async () => {
+    logins += 1;
+    throw new TypeError("fetch failed");
+  };
+  await ctx.login(); // boot attempt fails on the network: a retry is armed
+  assert.ok(state.timers.loginRetry);
+  await wsCall(ctx, { id: 1, cmd: "auth.retrigger" }); // the user's attempt fails as well
+  assert.equal(state.timers.loginRetry, null);
+  t.mock.timers.tick(10 * 60_000);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(logins, 2, "no automatic attempt after the user took over");
+  httpServer.close();
+});
