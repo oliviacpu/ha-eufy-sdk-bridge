@@ -181,6 +181,10 @@ export function loadConfig(env = process.env) {
     // carry no person_id). Confirmed on HomeBase 3 (trigger_type 2=motion, 4=person); HB2's values are
     // unverified, so this is OFF by default. See bridge #35.
     personFromRecord: truthy(env.EUFY_PERSON_FROM_RECORD),
+    // EUFY_LOGIN_RETRY: a login that fails for a reason no user can answer (no network yet at boot, eufy's cloud
+    // briefly down) is tried again after 15 s, 30 s, 1, 2, then every 5 min, instead of waiting for a frontend to
+    // send auth.retrigger. Rejected credentials, 2FA and captcha still wait for the user. Off by default.
+    loginRetry: truthy(env.EUFY_LOGIN_RETRY),
     // Optional Anker Solix support — a SEPARATE Anker account (its own login + device backend), enabled
     // only when both SOLIX_EMAIL and SOLIX_PASSWORD are set. Independent of the eufy client; its own
     // persisted session file. Country falls back to the eufy country.

@@ -39,6 +39,19 @@ Upstream's README, `CONTRIBUTING.md` and `docs/` still apply.
 
 Newest first.
 
+### Login retried after a network failure (2026-11-23)
+
+- **What it adds:** `EUFY_LOGIN_RETRY` (default off): a login that fails for a reason no user can answer is tried
+  again after 15 s, 30 s, 1 and 2 min, then every 5 min, until it logs in or eufy asks for 2FA or a captcha. Rejected
+  credentials (`26108`) are never retried. Covers the boot login and the re-login after a post-boot session loss; a
+  login over the WS (`auth.retrigger`, `auth.submit`) cancels a pending retry as it starts.
+- **Cause:** the boot login ran exactly once. On 2026-11-22 the host's 03:30 maintenance restart started the bridge
+  before the network was usable; the login failed with `fetch failed` and the bridge stayed `pending` for 31 hours,
+  since the integration only polls `auth.status`. Every camera, the doorbell and the HomeBase were unavailable in HA.
+- **Change:** `src/auth.mjs` gains `login()` and the retry schedule (`LOGIN_RETRY_MS`, timer in
+  `state.timers.loginRetry`, cleared on shutdown); `server.mjs` boots through it; `src/config.mjs` reads the setting.
+  Docs: `docs/docker-compose.md`. Tests: `test/login-retry.test.mjs`.
+
 ### Clip archive backfill from a HomeBase 3's past days (2026-11-21)
 
 - **What it adds:** `CLIP_ARCHIVE_BACKFILL_DAYS` (default 0, off): each archive sweep also saves every recording the

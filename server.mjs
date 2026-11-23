@@ -104,28 +104,11 @@ eufy.on("pushDisconnect", () => {
   state.flags.pushSince = Date.now();
 });
 
-// eufy answers a wrong country with the same `200/26108 Email address or password incorrect`
-// it uses for a genuinely wrong password, which sends people to debug the one thing that isn't
-// wrong (#60). The upstream code doesn't separate the two cases, so don't pretend to — just
-// name the other candidate, since it is the one nobody thinks of.
-const COUNTRY_HINT =
-  " (if the credentials are definitely right, check EUFY_COUNTRY: it must be the country the" +
-  " account was registered in)";
-
-function loginFailureHint(e) {
-  const msg = String(e?.message ?? e);
-  return /26108|password incorrect/i.test(msg) ? msg + COUNTRY_HINT : msg;
-}
-
 // ── boot ───────────────────────────────────────────────────────────────────────────────────────────
 async function main() {
   // Serve FIRST — the WS must be reachable so a client can drive 2FA/captcha before we're authed.
   httpServer.listen(cfg.port, cfg.host, () => console.log(`[bridge] listening on ${cfg.host}:${cfg.port}`));
-  try {
-    await ctx.applyLogin(await eufy.login());
-  } catch (e) {
-    console.error(`[bridge] login attempt failed: ${loginFailureHint(e)} — retry via WS 'auth.retrigger'`);
-  }
+  await ctx.login(); // a failure nobody can answer is retried on its own (auth.mjs, LOGIN_RETRY_MS)
   if (state.flags.ready) console.log("[bridge] logged in from a stored session");
   else
     console.log(`[bridge] auth required: ${ctx.authStatus().state} — drive it over WS /ws (auth.status / auth.submit)`);
@@ -138,6 +121,7 @@ async function main() {
 async function shutdown() {
   const { timers, flags } = state;
   if (timers.watchdog) clearInterval(timers.watchdog);
+  ctx.cancelLoginRetry();
   if (timers.streamIdle) clearInterval(timers.streamIdle);
   if (timers.rtspIdle) clearInterval(timers.rtspIdle);
   flags.go2rtcProc?.kill();

@@ -109,13 +109,18 @@ export function createWsServer(ctx, httpServer) {
           return reply({ auth: ctx.authStatus(), bridgeId: ctx.bridgeId });
         case "auth.submit": {
           // A 2FA code (`code`) or a captcha answer (`captcha`). The pending id/token is held in the SDK.
+          // The user is driving the login now: drop a pending automatic retry first (EUFY_LOGIN_RETRY), so it
+          // can't race this request or fire after it fails.
+          ctx.cancelLoginRetry();
           if (msg.captcha != null) await ctx.applyLogin(await eufy.solveCaptcha(String(msg.captcha)));
           else if (msg.code != null) await ctx.applyLogin(await eufy.submitVerifyCode(String(msg.code)));
           else return fail("auth.submit needs { code } (2FA) or { captcha } (captcha answer)");
           return reply({ auth: ctx.authStatus() });
         }
         case "auth.retrigger":
-          // Re-request a fresh challenge (new captcha image / new 2FA code).
+          // Re-request a fresh challenge (new captcha image / new 2FA code). Drops a pending automatic retry
+          // first, as auth.submit does.
+          ctx.cancelLoginRetry();
           await ctx.applyLogin(await eufy.login());
           return reply({ auth: ctx.authStatus() });
 
