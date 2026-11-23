@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { LoginStatus } from "@mega-yfue/eufy-sdk";
 import { createState } from "../src/state.mjs";
 import { createAuth, LOGIN_RETRY_MS, isCredentialError } from "../src/auth.mjs";
+import { createWatchdog } from "../src/watchdog.mjs";
 
 /** createAuth against a fake eufy whose login() plays back `results` (an Error is thrown, anything else returned). */
 function authFixture(results, { loginRetry = true } = {}) {
@@ -145,6 +146,30 @@ test("without EUFY_LOGIN_RETRY a failed login waits for auth.retrigger, as upstr
   await settle();
   assert.equal(calls.login, 1);
   assert.equal(ctx.authStatus().state, "pending");
+});
+
+test("a scheduled re-login after boot holds the recovery guard, so the push watchdog stays out", async (t) => {
+  quiet(t);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let release;
+  const pending = new Promise((r) => (release = r));
+  const { ctx, state, calls } = authFixture([new TypeError("fetch failed"), pending]);
+  ctx.PUSH_STALL_MS = 5 * 60_000;
+  Object.assign(ctx, createWatchdog(ctx));
+  state.flags.ready = true;
+  state.flags.pushConnected = false;
+  state.flags.pushSince = Date.now() - 10 * 60_000; // push down long enough for the watchdog to act
+  await ctx.onSessionExpired();
+  t.mock.timers.tick(LOGIN_RETRY_MS[0]); // the scheduled re-login starts and waits on the SDK
+  await settle();
+  assert.equal(calls.login, 2);
+  assert.equal(state.flags.recovering, true);
+  await ctx.watchdogTick();
+  assert.equal(calls.login, 2, "the watchdog did not start a second login");
+  release({ status: LoginStatus.Ok });
+  await settle();
+  assert.equal(state.flags.recovering, false);
+  assert.equal(ctx.authStatus().state, "ok");
 });
 
 test("isCredentialError tells a rejected account from a network failure", () => {

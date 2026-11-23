@@ -106,10 +106,17 @@ export function createAuth(ctx) {
    * frontend sends auth.retrigger.
    */
   async function login(label = "login attempt") {
+    // After boot, a re-login holds the same guard onSessionExpired does, so the push watchdog can't disconnect
+    // and log in underneath it. If a recovery is already running, leave it to that one.
+    const afterBoot = flags.ready;
+    if (afterBoot && flags.recovering) return;
+    if (afterBoot) flags.recovering = true;
     try {
       await applyLogin(await eufy.login());
     } catch (err) {
       onLoginFailure(label, err);
+    } finally {
+      if (afterBoot) flags.recovering = false;
     }
   }
 
