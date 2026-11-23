@@ -4,9 +4,29 @@
 // place. Reads cross-module functions (broadcast, completeBoot) off `ctx` at call time.
 import { LoginStatus } from "@mega-yfue/eufy-sdk";
 
+// With EUFY_LOGIN_RETRY on, the waits between login attempts after a failure no user can answer (the network
+// isn't up yet at boot, eufy's cloud is briefly down): quick at first, since the usual cause is a host boot that
+// beat the network, then every 5 minutes for as long as it takes. A 2FA/captcha challenge or rejected
+// credentials stop the retries.
+export const LOGIN_RETRY_MS = [15_000, 30_000, 60_000, 120_000, 300_000];
+
+// eufy answers a wrong country with the same `200/26108 Email address or password incorrect`
+// it uses for a genuinely wrong password, which sends people to debug the one thing that isn't
+// wrong (#60). The upstream code doesn't separate the two cases, so don't pretend to — just
+// name the other candidate, since it is the one nobody thinks of.
+const COUNTRY_HINT =
+  " (if the credentials are definitely right, check EUFY_COUNTRY: it must be the country the" +
+  " account was registered in)";
+
+/** eufy rejected the account itself: retrying would only repeat the rejection (and risk a lockout). */
+export function isCredentialError(e) {
+  return /26108|password incorrect/i.test(String(e?.message ?? e));
+}
+
 export function createAuth(ctx) {
   const { eufy } = ctx;
-  const { flags } = ctx.state;
+  const { flags, timers } = ctx.state;
+  let retryStreak = 0; // failed attempts in a row, picks the next LOGIN_RETRY_MS wait
 
   /** The normalized auth state a frontend reads — one shape for auth.status, the `auth` event and /healthz. */
   function authStatus() {
@@ -34,6 +54,7 @@ export function createAuth(ctx) {
   async function applyLogin(result) {
     flags.lastLogin = result;
     if (result.status === LoginStatus.Ok) {
+      cancelLoginRetry(); // a WS auth.retrigger may beat a pending retry
       eufy.forgetDevices?.(); // a fresh session rebinds command sinks: rebuild devices on next use
       await ctx.completeBoot(); // no-op once `ready` (first boot only), so re-auth never re-wires listeners
       if (flags.sessionLost) {
@@ -44,6 +65,52 @@ export function createAuth(ctx) {
       }
     }
     ctx.broadcast({ event: "auth", ...authStatus() });
+  }
+
+  function cancelLoginRetry() {
+    if (timers.loginRetry) clearTimeout(timers.loginRetry);
+    timers.loginRetry = null;
+    retryStreak = 0;
+  }
+
+  /** Still worth logging in on our own: not logged in (or kicked), and eufy isn't waiting on the user. */
+  function loginWanted() {
+    const status = flags.lastLogin?.status;
+    const needsUser = status === LoginStatus.Captcha || status === LoginStatus.TwoFactor;
+    return (!flags.ready || flags.sessionLost) && !needsUser;
+  }
+
+  /** After a failed login: with EUFY_LOGIN_RETRY on, anything but rejected credentials is tried again later. */
+  function onLoginFailure(label, err) {
+    const msg = String(err?.message ?? err);
+    if (isCredentialError(err) || !ctx.cfg?.loginRetry) {
+      cancelLoginRetry();
+      const hint = isCredentialError(err) ? COUNTRY_HINT : "";
+      console.error(`[bridge] ${label} failed: ${msg}${hint} — retry via WS 'auth.retrigger'`);
+      return;
+    }
+    const wait = LOGIN_RETRY_MS[Math.min(retryStreak, LOGIN_RETRY_MS.length - 1)];
+    retryStreak += 1;
+    console.error(`[bridge] ${label} failed: ${msg} — trying again in ${Math.round(wait / 1000)} s`);
+    if (timers.loginRetry) clearTimeout(timers.loginRetry);
+    timers.loginRetry = setTimeout(() => {
+      timers.loginRetry = null;
+      if (loginWanted()) void login(label);
+    }, wait);
+    timers.loginRetry.unref?.();
+  }
+
+  /**
+   * Log in and apply the result; a failure goes to onLoginFailure. Without EUFY_LOGIN_RETRY the boot login runs
+   * once (upstream's behaviour), so a host boot that beats the network leaves the bridge `pending` until a
+   * frontend sends auth.retrigger.
+   */
+  async function login(label = "login attempt") {
+    try {
+      await applyLogin(await eufy.login());
+    } catch (err) {
+      onLoginFailure(label, err);
+    }
   }
 
   /** Guarded entry: kick off a single re-auth after a post-boot session loss. */
@@ -69,11 +136,11 @@ export function createAuth(ctx) {
       else console.log("[bridge] cloud session re-established after expiry");
     } catch (err) {
       ctx.broadcast({ event: "auth", ...authStatus() });
-      console.error(`[bridge] session recovery failed: ${err?.message ?? err}`);
+      onLoginFailure("session recovery", err);
     } finally {
       flags.recovering = false;
     }
   }
 
-  return { authStatus, applyLogin, maybeRecoverSession, onSessionExpired };
+  return { authStatus, applyLogin, login, cancelLoginRetry, maybeRecoverSession, onSessionExpired };
 }
